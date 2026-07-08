@@ -3,3 +3,15 @@
 .env
 __pycache__/
 *.pyc
+\
+# Ignorar arquivos de configuração e chaves secretas
+.env
+
+# Ignorar todos os arquivos compactados .zip
+*.zip
+
+# Ignorar todos os arquivos de dados .csv
+*.csv
+
+# Ignorar uma pasta específica chamada 'data' e tudo dentro dela
+data/
