@@ -4,7 +4,7 @@ __pycache__/
 \
 
 # Ignorar todos os arquivos compactados .zip
-*_MySQL/.env
+*.env
 
 # Ignorar todos os arquivos compactados .zip
 *.zip
