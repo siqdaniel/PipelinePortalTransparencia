@@ -1,11 +1,10 @@
 # Created by venv; see https://docs.python.org/3/library/venv.html
  venv/
-.env
+_MySQL/.env
 __pycache__/
 *.pyc
 \
-# Ignorar arquivos de configuração e chaves secretas
-.env
+
 
 # Ignorar todos os arquivos compactados .zip
 *.zip
