@@ -1,6 +1,6 @@
 import os
 import zipfile
-import requests
+import gdown
 import pandas as pd
 from config import (
     PASTA_DADOS, 
@@ -14,28 +14,20 @@ import banco
 
 def baixar_arquivo_drive(file_id, caminho_destino):
     """
-    Baixa o arquivo zip do Google Drive utilizando a API pública de download.
+    Baixa arquivos do Google Drive utilizando a biblioteca gdown,
+    contornando nativamente avisos de segurança para arquivos grandes.
     """
-    print(f"Iniciando o download do arquivo ID: {file_id}")
-    # URL de exportação/download direto para arquivos públicos do Google Drive
-    url = f"https://docs.google.com/uc?export=download&id={file_id.split('?')[0]}"
-    
+    print(f"Iniciando o download automatizado via gdown do ID: {file_id}")
     try:
-        resposta = requests.get(url, stream=True)
-        resposta.raise_for_status()
-        
-        # Cria a pasta de dados se não existir
+        # Garante que a pasta de destino exista
         caminho_destino.parent.mkdir(parents=True, exist_ok=True)
         
-        with open(caminho_destino, "wb") as f:
-            for bloco in resposta.iter_content(chunk_size=8192):
-                if bloco:
-                    f.write(bloco)
+        # O gdown aceita o ID diretamente e gerencia o download em blocos visualmente
+        gdown.download(id=file_id, output=str(caminho_destino), quiet=False)
+        
         print(f"Download concluído com sucesso! Salvo em: {caminho_destino}")
     except Exception as e:
-        raise RuntimeError(f"Falha ao baixar o arquivo do Google Drive: {e}")
-
-
+        raise RuntimeError(f"Falha ao baixar o arquivo usando gdown: {e}")
 def carregar_csv_para_raw(conexao, caminho_zip, nome_csv, tabela_raw):
     """
     Abre o CSV de dentro do ZIP, lê em blocos (chunks) utilizando o pandas
@@ -43,43 +35,57 @@ def carregar_csv_para_raw(conexao, caminho_zip, nome_csv, tabela_raw):
     """
     print(f"Processando arquivo '{nome_csv}' para a tabela '{tabela_raw}'...")
     
-    # 1. Garantir Idempotência: Limpa a tabela antes de inserir os novos dados
+    # Garantir Idempotência: Limpa a tabela antes de inserir os novos dados
     banco.executar(conexao, f"TRUNCATE TABLE {tabela_raw}")
+    
+    # Descobre quantas colunas a tabela física possui no MySQL
+    cursor = conexao.cursor()
+    cursor.execute(f"SELECT * FROM {tabela_raw} LIMIT 0")
+    cursor.fetchall()
+    num_colunas_banco = len(cursor.description)
+    cursor.close()
     
     try:
         with zipfile.ZipFile(caminho_zip, 'r') as z:
-            # Verifica se o arquivo existe dentro do zip
             if nome_csv not in z.namelist():
                 raise FileNotFoundError(f"Arquivo {nome_csv} não encontrado dentro do ZIP.")
                 
             with z.open(nome_csv) as f:
-                # O pandas lê o arquivo em pedaços (TextFileReader)
                 leitor_blocos = pd.read_csv(
                     f,
                     sep=CSV_SEPARADOR,
                     encoding=CSV_ENCODING,
-                    dtype=str,             # Força todas as colunas como string (Exigência da RAW)
+                    dtype=str,             # Mantém os dados brutos como texto na camada Raw
                     chunksize=TAMANHO_BLOCO,
                     low_memory=False
                 )
                 
                 total_linhas = 0
+                # Monta a query fixa baseada no número de colunas real da tabela do banco
+                placeholders = ", ".join(["%s"] * num_colunas_banco)
+                sql_insert = f"INSERT INTO {tabela_raw} VALUES ({placeholders})"
+                
                 for chunk in leitor_blocos:
-                    # Substitui valores NaN/None por strings vazias para evitar quebras no banco
                     chunk = chunk.fillna("")
                     
-                    # Converte o DataFrame do bloco em uma lista de tuplas
-                    linhas = [tuple(x) for x in chunk.to_numpy()]
+                    linhas = []
+                    for row in chunk.to_numpy():
+                        # Converte a linha para lista para podermos manipular o tamanho
+                        lista_valores = list(row)
+                        
+                        # Se a linha do CSV tiver mais colunas que o banco, corta o excesso
+                        if len(lista_valores) > num_colunas_banco:
+                            lista_valores = lista_valores[:num_colunas_banco]
+                        # Se tiver menos colunas, preenche com strings vazias
+                        elif len(lista_valores) < num_colunas_banco:
+                            lista_valores.extend([""] * (num_colunas_banco - len(lista_valores)))
+                            
+                        linhas.append(tuple(lista_valores))
                     
                     if not linhas:
                         continue
-                        
-                    # Dinamiza os placeholders '%s' de acordo com o número de colunas do CSV
-                    num_colunas = len(chunk.columns)
-                    placeholders = ", ".join(["%s"] * num_colunas)
-                    sql_insert = f"INSERT INTO {tabela_raw} VALUES ({placeholders})"
                     
-                    # Inserção em lote usando a função do modulo banco.py
+                    # Inserção em lote segura
                     banco.inserir_em_lote(conexao, sql_insert, linhas)
                     total_linhas += len(linhas)
                     
@@ -87,17 +93,15 @@ def carregar_csv_para_raw(conexao, caminho_zip, nome_csv, tabela_raw):
                 
     except Exception as e:
         print(f"ERRO ao processar o arquivo {nome_csv}: {e}")
-        raise e
+        raise 
 
 
 def main():
-    # Definição do caminho do arquivo local
+    # Definição do caminho do arquivo local onde o zip será salvo
     caminho_zip = PASTA_DADOS / "viagens_2025_6meses.zip"
     
-    # Passo 1: Download do arquivo
+    # Passo 1: Download do arquivo via gdown (Atendendo ao requisito e dica da professora)
     try:
-        # Se o arquivo já existir localmente e você não quiser baixar sempre, 
-        # pode comentar a linha abaixo. Mas para o pipeline de produção automatizado:
         baixar_arquivo_drive(DRIVE_FILE_ID, caminho_zip)
     except Exception as e:
         print(f"Fase de Download falhou: {e}")

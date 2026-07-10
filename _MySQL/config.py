@@ -53,7 +53,7 @@ MYSQL_CONFIG = {
 ANO = "2025"
 
 # ---- De onde baixar o .zip ----
-DRIVE_FILE_ID = "1gfEfTD5Lwop6fjiOWeXIfRLU24cn3pgK?usp=drive_link"
+DRIVE_FILE_ID = "1Sru-TYSYo-cn-L9WW2DUwhyIUdkM3fIe"
 
 # Tamanho do bloco de leitura/insercao (numero de linhas por vez).
 
