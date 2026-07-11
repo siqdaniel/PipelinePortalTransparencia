@@ -71,10 +71,17 @@ def transformar_viagens(conexao):
         chunk['id_viagem'] = chunk['id_viagem'].fillna("IGNORADO")
         
         chunk_silver = chunk[colunas_silver].copy()
+        
+        # BLINDAGEM CRÍTICA: Corta qualquer string que passe do limite do VARCHAR(255) do banco
+        chunk_silver['cod_orgao_superior'] = chunk_silver['cod_orgao_superior'].astype(str).str.slice(0, 255)
+        chunk_silver['nome_orgao_superior'] = chunk_silver['nome_orgao_superior'].astype(str).str.slice(0, 255)
+        chunk_silver['nome_viajante'] = chunk_silver['nome_viajante'].astype(str).str.slice(0, 255)
+        chunk_silver['cargo'] = chunk_silver['cargo'].astype(str).str.slice(0, 255)
+        
+        # Mantém o corte dos campos longos TEXT
         chunk_silver['destinos'] = chunk_silver['destinos'].astype(str).str.slice(0, 4000)
         chunk_silver['motivo'] = chunk_silver['motivo'].astype(str).str.slice(0, 4000)
         
-        # SOLUÇÃO DEFINITIVA: Sanitização na conversão para tuplas usando Python Puro
         linhas = [sanitizar_tupla(x) for x in chunk_silver.to_numpy()]
         banco.inserir_em_lote(conexao, sql_insert, linhas)
         
@@ -177,8 +184,11 @@ def transformar_trechos(conexao):
         'origem_cidade', 'destino_data', 'destino_uf', 'destino_cidade', 
         'meio_transporte', 'numero_diarias'
     ]
+    
+    # CORREÇÃO CRÍTICA: Mudamos de 'INSERT INTO' para 'INSERT IGNORE INTO'.
+    # Se houver duplicidade entre chunks diferentes, o MySQL descarta a cópia silenciosamente sem falhar o pipeline.
     placeholders = ", ".join(["%s"] * len(colunas_silver))
-    sql_insert = f"INSERT INTO silver_trecho ({', '.join(colunas_silver)}) VALUES ({placeholders})"
+    sql_insert = f"INSERT IGNORE INTO silver_trecho ({', '.join(colunas_silver)}) VALUES ({placeholders})"
 
     while True:
         linhas_raw = cursor.fetchmany(TAMANHO_BLOCO)
@@ -200,7 +210,7 @@ def transformar_trechos(conexao):
         
         chunk_silver = chunk[chunk['id_viagem'].notna()][colunas_silver].copy()
         
-        # SOLUÇÃO DEFINITIVA: Sanitização na conversão para tuplas usando Python Puro
+        # Sanitização para garantir compatibilidade com tipos do MySQL
         linhas = [sanitizar_tupla(x) for x in chunk_silver.to_numpy()]
         banco.inserir_em_lote(conexao, sql_insert, linhas)
         
